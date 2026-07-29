@@ -4,6 +4,12 @@
 
 它直接复用 Codex 已有的额度状态，不会启动额外进程，也不会自行发送网络请求。Codex 位于前台时，原生额度状态通常每分钟刷新；重新聚焦窗口时也会刷新。
 
+## 实际效果
+
+<img width="262" height="47" alt="codex-light" src="https://github.com/user-attachments/assets/281a82b5-37dc-49a8-8070-d7621f00e141" />
+<img width="269" height="54" alt="codex-dark" src="https://github.com/user-attachments/assets/a318bee6-1668-44ad-b473-9c70b6637b3d" />
+
+
 > [!WARNING]
 > 该工具会修改本机 Codex 应用资源，并可能使原有代码签名失效；它不隶属于 OpenAI，也未获得 OpenAI 官方支持。Codex 更新可能覆盖补丁。请仅在理解风险并保留备份的前提下使用。
 
