@@ -67,6 +67,10 @@ npm run restore
 - 安装后再次读取磁盘验收；失败时自动恢复原文件。
 - 不读取或上传对话、账号凭据及其他个人数据。
 
+## AI 协作说明
+
+本项目由 [brooke-11](https://github.com/brooke-11) 发起，并在 [OpenAI Codex](https://github.com/codex) 协助下完成设计、实现、安全检查与文档整理。
+
 ## License
 
 [MIT](LICENSE)
