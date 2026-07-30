@@ -4,7 +4,7 @@
   "description": "Unofficial macOS Codex desktop patch that shows weekly usage remaining as a percentage.",
   "private": true,
   "type": "module",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/brooke-11/codex-usage-percentage.git"

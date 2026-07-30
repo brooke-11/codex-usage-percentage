@@ -9,7 +9,6 @@
 <img width="262" height="47" alt="codex-light" src="https://github.com/user-attachments/assets/281a82b5-37dc-49a8-8070-d7621f00e141" />
 <img width="269" height="54" alt="codex-dark" src="https://github.com/user-attachments/assets/a318bee6-1668-44ad-b473-9c70b6637b3d" />
 
-
 > [!WARNING]
 > 该工具会修改本机 Codex 应用资源，并可能使原有代码签名失效；它不隶属于 OpenAI，也未获得 OpenAI 官方支持。Codex 更新可能覆盖补丁。请仅在理解风险并保留备份的前提下使用。
 
@@ -79,4 +78,6 @@ npm run restore
 
 ## License
 
-[MIT](LICENSE)
+本项目采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。
+
+源码可以查看、学习、修改，并用于非商业项目。任何商业使用均须事先获得项目作者的单独书面许可。
