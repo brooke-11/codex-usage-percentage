@@ -6,7 +6,6 @@ import {
   inspectTarget,
   restoreBackup,
 } from "./patch-app.mjs";
-import { TARGET } from "./config.mjs";
 
 const command = process.argv[2];
 
@@ -21,7 +20,8 @@ try {
             mode: command,
             version: target.version,
             build: target.build,
-            assetPath: TARGET.assetPath,
+            assetPath: target.assetPath,
+            family: target.family,
             patched: true,
             alreadyInstalled: true,
           },
@@ -40,6 +40,7 @@ try {
               version: candidate.version,
               build: candidate.build,
               assetPath: candidate.assetPath,
+              family: candidate.family,
               patched: candidate.patched,
             },
             null,

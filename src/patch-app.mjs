@@ -76,81 +76,97 @@ function normalizeArchiveEntry(entry) {
   return entry.startsWith("/") ? entry.slice(1) : entry;
 }
 
+export function discoverRendererAsset(entries) {
+  const matches = entries
+    .map(normalizeArchiveEntry)
+    .filter((entry) =>
+      /^webview\/assets\/app-initial-[^/]+\.js$/.test(entry),
+    );
+  if (matches.length !== 1) {
+    throw new Error(
+      `renderer JavaScript asset count must be 1; got ${matches.length}`,
+    );
+  }
+  return matches[0];
+}
+
 export function extractFreshFile(archivePath, filename) {
   uncache(archivePath);
   return extractFile(archivePath, filename);
 }
 
-function backupDirectory() {
-  return path.join(TARGET.backupRoot, `${TARGET.version}-${TARGET.build}`);
+function backupDirectory(target) {
+  return path.join(TARGET.backupRoot, `${target.version}-${target.build}`);
 }
 
-function manifestData() {
+export function manifestData(target, candidate = null) {
   return {
     appPath: TARGET.appPath,
-    version: TARGET.version,
-    build: TARGET.build,
-    archiveSha256: TARGET.archiveSha256,
-    assetPath: TARGET.assetPath,
-    assetSha256: TARGET.assetSha256,
+    version: target.version,
+    build: target.build,
+    archiveSha256: target.archiveSha256,
+    assetPath: target.assetPath,
+    assetSha256: target.assetSha256,
+    family: target.family,
+    ...(candidate == null
+      ? {}
+      : {
+          patchedArchiveSha256: candidate.archiveSha256,
+          patchedAssetSha256: candidate.assetSha256,
+        }),
   };
 }
 
 export async function inspectTarget() {
-  const [version, build, archiveSha256] = await Promise.all([
+  const [version, build, archiveSha256, archiveEntries] = await Promise.all([
     plistValue("CFBundleShortVersionString"),
     plistValue("CFBundleVersion"),
     sha256File(ARCHIVE),
+    listPackage(ARCHIVE),
   ]);
-
-  if (version !== TARGET.version || build !== TARGET.build) {
-    throw new Error(
-      `unsupported Codex version ${version} (${build}); expected ${TARGET.version} (${TARGET.build})`,
-    );
-  }
-
-  const assetBuffer = extractFreshFile(ARCHIVE, TARGET.assetPath);
+  const assetPath = discoverRendererAsset(archiveEntries);
+  const assetBuffer = extractFreshFile(ARCHIVE, assetPath);
   const asset = assetBuffer.toString("utf8");
   const assetSha256 = sha256Buffer(assetBuffer);
   const inspection = inspectRenderer(asset);
-
+  const compatible = inspection.candidates.filter(
+    (candidate) => candidate.complete,
+  );
   if (inspection.patched) {
-    if (
-      archiveSha256 !== TARGET.patchedArchiveSha256 ||
-      assetSha256 !== TARGET.patchedAssetSha256
-    ) {
-      throw new Error(
-        "patched Codex files do not match the validated patch build",
-      );
-    }
-    return {
-      version,
-      build,
-      archiveSha256,
-      assetSha256,
-      asset,
-      patched: true,
-    };
-  }
-
-  if (archiveSha256 !== TARGET.archiveSha256) {
-    throw new Error(
-      `archive hash mismatch; expected ${TARGET.archiveSha256}, got ${archiveSha256}`,
+    const manifestFile = path.join(
+      backupDirectory({ version, build }),
+      "manifest.json",
     );
+    if (!(await exists(manifestFile))) {
+      throw new Error("patched renderer has no validated install manifest");
+    }
+    const saved = JSON.parse(await readFile(manifestFile, "utf8"));
+    if (
+      saved.appPath !== TARGET.appPath ||
+      saved.version !== version ||
+      saved.build !== build ||
+      saved.assetPath !== assetPath ||
+      saved.family !== inspection.family ||
+      saved.patchedArchiveSha256 !== archiveSha256 ||
+      saved.patchedAssetSha256 !== assetSha256
+    ) {
+      throw new Error("patched Codex files do not match the install manifest");
+    }
   }
-
-  if (assetSha256 !== TARGET.assetSha256) {
+  if (!inspection.patched && compatible.length !== 1) {
     throw new Error(
-      `renderer hash mismatch; expected ${TARGET.assetSha256}, got ${assetSha256}`,
+      `supported account-footer structure anchors count must be 1; got ${compatible.length}`,
     );
   }
   return {
     version,
     build,
     archiveSha256,
+    assetPath,
     assetSha256,
     asset,
-    patched: false,
+    family: inspection.patched ? inspection.family : compatible[0].family,
+    patched: inspection.patched,
   };
 }
 
@@ -164,7 +180,7 @@ export async function buildPatchedArchive(target = null) {
 
   try {
     extractAll(ARCHIVE, extractedRoot);
-    const assetFile = path.join(extractedRoot, TARGET.assetPath);
+    const assetFile = path.join(extractedRoot, target.assetPath);
     const source = await readFile(assetFile, "utf8");
     const patched = patchRenderer(source);
     await writeFile(assetFile, patched);
@@ -175,24 +191,20 @@ export async function buildPatchedArchive(target = null) {
 
     const candidateAssetBuffer = extractFreshFile(
       candidateArchive,
-      TARGET.assetPath,
+      target.assetPath,
     );
     const candidateAsset = candidateAssetBuffer.toString("utf8");
     const candidateInspection = inspectRenderer(candidateAsset);
-    if (!candidateInspection.patched) {
+    if (
+      !candidateInspection.patched ||
+      candidateInspection.family !== target.family
+    ) {
       throw new Error("candidate renderer does not contain the patch marker");
     }
     const [candidateArchiveSha256, candidateAssetSha256] = await Promise.all([
       sha256File(candidateArchive),
       Promise.resolve(sha256Buffer(candidateAssetBuffer)),
     ]);
-    if (
-      candidateArchiveSha256 !== TARGET.patchedArchiveSha256 ||
-      candidateAssetSha256 !== TARGET.patchedAssetSha256
-    ) {
-      throw new Error("candidate patch checksums do not match the validated build");
-    }
-
     const [originalEntries, candidateEntries] = await Promise.all([
       listPackage(ARCHIVE),
       listPackage(candidateArchive),
@@ -214,7 +226,10 @@ export async function buildPatchedArchive(target = null) {
       ok: true,
       version: target.version,
       build: target.build,
-      assetPath: TARGET.assetPath,
+      assetPath: target.assetPath,
+      family: target.family,
+      archiveSha256: candidateArchiveSha256,
+      assetSha256: candidateAssetSha256,
       patched: true,
       tempDir,
       candidateArchive,
@@ -230,27 +245,34 @@ export function shouldRequireAppClosed(options = {}) {
   return options.allowRunning !== true;
 }
 
-async function createBackup() {
-  const directory = backupDirectory();
+async function createBackup(target, candidate) {
+  const directory = backupDirectory(target);
   const manifest = path.join(directory, "manifest.json");
   if (await exists(manifest)) {
     const saved = JSON.parse(await readFile(manifest, "utf8"));
     if (
-      saved.archiveSha256 !== TARGET.archiveSha256 ||
-      saved.version !== TARGET.version ||
-      saved.build !== TARGET.build
+      saved.appPath !== TARGET.appPath ||
+      saved.archiveSha256 !== target.archiveSha256 ||
+      saved.version !== target.version ||
+      saved.build !== target.build ||
+      saved.assetPath !== target.assetPath ||
+      saved.assetSha256 !== target.assetSha256
     ) {
       throw new Error("existing backup manifest does not match this patch");
     }
     if (
       (await sha256File(path.join(directory, "app.asar"))) !==
-      TARGET.archiveSha256
+      target.archiveSha256
     ) {
       throw new Error("existing backup archive failed checksum validation");
     }
     if (!(await isDirectory(path.join(directory, "app.asar.unpacked")))) {
       throw new Error("existing backup is missing its unpacked resource directory");
     }
+    await writeFile(
+      manifest,
+      `${JSON.stringify(manifestData(target, candidate), null, 2)}\n`,
+    );
     return directory;
   }
 
@@ -260,7 +282,10 @@ async function createBackup() {
     recursive: true,
     preserveTimestamps: true,
   });
-  await writeFile(manifest, `${JSON.stringify(manifestData(), null, 2)}\n`);
+  await writeFile(
+    manifest,
+    `${JSON.stringify(manifestData(target, candidate), null, 2)}\n`,
+  );
   return directory;
 }
 
@@ -304,7 +329,7 @@ export async function applyPatch(options = {}) {
   const target = await inspectTarget();
   const candidate = await buildPatchedArchive(target);
   try {
-    const backup = await createBackup();
+    const backup = await createBackup(target, candidate);
     await installWithRollback({
       install: () =>
         replaceResources(
@@ -313,9 +338,14 @@ export async function applyPatch(options = {}) {
         ),
       validate: async () => {
         const installed = await inspectTarget();
-        if (!installed.patched) {
+        if (
+          !installed.patched ||
+          installed.family !== candidate.family ||
+          installed.archiveSha256 !== candidate.archiveSha256 ||
+          installed.assetSha256 !== candidate.assetSha256
+        ) {
           throw new Error(
-            "installed renderer does not contain the patch marker",
+            "installed renderer does not match the validated candidate",
           );
         }
       },
@@ -330,6 +360,7 @@ export async function applyPatch(options = {}) {
       mode: options.allowRunning === true ? "apply-live" : "apply",
       version: target.version,
       build: target.build,
+      family: target.family,
       backup,
       patched: true,
     };
@@ -340,7 +371,11 @@ export async function applyPatch(options = {}) {
 
 export async function restoreBackup() {
   await assertAppClosed();
-  const directory = backupDirectory();
+  const [version, build] = await Promise.all([
+    plistValue("CFBundleShortVersionString"),
+    plistValue("CFBundleVersion"),
+  ]);
+  const directory = backupDirectory({ version, build });
   const manifestFile = path.join(directory, "manifest.json");
   if (!(await exists(manifestFile))) {
     throw new Error("no validated backup exists for this Codex version");
@@ -348,8 +383,8 @@ export async function restoreBackup() {
 
   const manifest = JSON.parse(await readFile(manifestFile, "utf8"));
   if (
-    manifest.version !== TARGET.version ||
-    manifest.build !== TARGET.build ||
+    manifest.version !== version ||
+    manifest.build !== build ||
     manifest.appPath !== TARGET.appPath
   ) {
     throw new Error("backup manifest target does not match this Codex version");
@@ -358,7 +393,7 @@ export async function restoreBackup() {
   const sourceArchive = path.join(directory, "app.asar");
   const sourceUnpacked = path.join(directory, "app.asar.unpacked");
   const digest = await sha256File(sourceArchive);
-  if (digest !== TARGET.archiveSha256) {
+  if (digest !== manifest.archiveSha256) {
     throw new Error("backup archive failed checksum validation");
   }
 
@@ -366,7 +401,9 @@ export async function restoreBackup() {
   const restored = await inspectTarget();
   if (
     restored.patched ||
-    restored.archiveSha256 !== TARGET.archiveSha256
+    restored.archiveSha256 !== manifest.archiveSha256 ||
+    restored.assetSha256 !== manifest.assetSha256 ||
+    restored.assetPath !== manifest.assetPath
   ) {
     throw new Error("restored Codex archive failed validation");
   }
@@ -374,8 +411,8 @@ export async function restoreBackup() {
   return {
     ok: true,
     mode: "restore",
-    version: TARGET.version,
-    build: TARGET.build,
+    version,
+    build,
     archiveSha256: restored.archiveSha256,
   };
 }
